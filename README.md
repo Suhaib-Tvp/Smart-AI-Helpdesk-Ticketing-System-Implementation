@@ -11,10 +11,3 @@ A Streamlit web application that uses Google Gemini AI to analyze IT helpdesk ti
 - 💾 **Data Persistence**: Saves all tickets to CSV for analysis
 - 📱 **Responsive Design**: Works on desktop and mobile devices
 
-## Setup Instructions
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/yourusername/smart-ai-helpdesk.git
-cd smart-ai-helpdesk

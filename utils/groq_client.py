@@ -9,16 +9,7 @@ class GroqClient:
     
     def __init__(self):
         """Initialize Groq client with API key from environment or secrets."""
-        # Import streamlit only when needed to avoid circular imports
-        try:
-            import streamlit as st
-            try:
-                api_key = st.secrets["GROQ_API_KEY"]
-            except (KeyError, FileNotFoundError, AttributeError):
-                api_key = os.getenv("GROQ_API_KEY")
-        except ImportError:
-            # Streamlit not available, use environment variable
-            api_key = os.getenv("GROQ_API_KEY")
+        api_key = self._get_api_key()
         
         if not api_key:
             raise ValueError(
@@ -27,13 +18,27 @@ class GroqClient:
                 "- Local: .env file"
             )
         
-        # Import groq here to catch initialization errors early
         try:
             from groq import Groq
             self.client = Groq(api_key=api_key)
             self.model = "llama-3.3-70b-versatile"
         except Exception as e:
             raise ValueError(f"Failed to initialize Groq client: {str(e)}")
+    
+    def _get_api_key(self) -> Optional[str]:
+        """Get API key from Streamlit secrets or environment."""
+        # Try Streamlit secrets first
+        try:
+            import streamlit as st
+            try:
+                return st.secrets["GROQ_API_KEY"]
+            except (KeyError, FileNotFoundError, AttributeError):
+                pass
+        except ImportError:
+            pass
+        
+        # Fall back to environment variable
+        return os.getenv("GROQ_API_KEY")
     
     def analyze_ticket(self, user_query: str) -> Optional[Dict]:
         """
@@ -81,21 +86,20 @@ Provide practical, actionable solutions."""
             return result
             
         except json.JSONDecodeError as e:
-            # Import streamlit only when showing error
-            try:
-                import streamlit as st
-                st.error(f"Failed to parse AI response: {e}")
-            except ImportError:
-                print(f"Failed to parse AI response: {e}")
+            self._show_error(f"Failed to parse AI response: {e}")
             return None
         except Exception as e:
-            try:
-                import streamlit as st
-                st.error(f"Error analyzing ticket: {e}")
-            except ImportError:
-                print(f"Error analyzing ticket: {e}")
+            self._show_error(f"Error analyzing ticket: {e}")
             return None
     
+    def _show_error(self, message: str):
+        """Show error message using Streamlit if available."""
+        try:
+            import streamlit as st
+            st.error(message)
+        except ImportError:
+            print(f"ERROR: {message}")
+    
     def get_token_usage(self) -> Dict:
-        """Get token usage statistics (if available in response)."""
+        """Get token usage statistics."""
         return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}

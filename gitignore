@@ -6,7 +6,8 @@ env/
 __pycache__/
 
 # Data
-*.csv
+data/*.csv
+data/*.json
 !data/.gitkeep
 
 # IDE

@@ -1,6 +1,19 @@
 """Smart AI Helpdesk Ticketing System - Main Application."""
 import streamlit as st
-from utils import GroqClient, TicketManager, KnowledgeBase
+import sys
+import os
+
+# Add current directory to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Import utilities
+try:
+    from utils import GroqClient, TicketManager, KnowledgeBase
+except ImportError as e:
+    st.error(f"❌ Failed to import required modules: {e}")
+    st.info("Please ensure all files in the 'utils' folder are present.")
+    st.stop()
+
 from dotenv import load_dotenv
 
 # Load environment variables

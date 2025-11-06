@@ -1,5 +1,11 @@
 """Analytics Dashboard Page."""
 import streamlit as st
+import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from utils import TicketManager, AnalyticsDashboard
 
 st.set_page_config(page_title="Analytics Dashboard", page_icon="📊", layout="wide")

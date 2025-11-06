@@ -22,6 +22,15 @@ class GroqClient:
             from groq import Groq
             self.client = Groq(api_key=api_key)
             self.model = "llama-3.3-70b-versatile"
+        except TypeError as e:
+            if "proxies" in str(e):
+                raise ValueError(
+                    "Dependency conflict detected. Please update requirements.txt:\n"
+                    "Add: httpx<0.28\n"
+                    "OR upgrade to: groq>=0.13.0\n"
+                    f"Original error: {str(e)}"
+                )
+            raise ValueError(f"Failed to initialize Groq client: {str(e)}")
         except Exception as e:
             raise ValueError(f"Failed to initialize Groq client: {str(e)}")
     

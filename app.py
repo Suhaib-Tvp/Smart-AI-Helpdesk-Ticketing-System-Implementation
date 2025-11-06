@@ -164,7 +164,10 @@ def analyze_issue(issue_text):
         return None
         
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        # ------------------- THIS IS THE FIX -------------------
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        # -------------------------------------------------------
+        
         prompt = build_prompt(issue_text)
         
         response = model.generate_content(prompt)

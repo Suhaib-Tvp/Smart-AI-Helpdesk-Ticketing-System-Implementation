@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from groq import Groq  # <-- CHANGED IMPORT
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -116,70 +116,72 @@ DEPARTMENT_MAPPING = {
     "Other": "General IT Support"
 }
 
-def configure_gemini():
-    """Configure Gemini API with Streamlit secrets"""
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-        genai.configure(api_key=api_key)
-        return True
-    except Exception as e:
-        st.error(f"Failed to configure Gemini API: {e}")
-        return False
+# -------------------------------------------------------------------
+#  OLD configure_gemini() and build_prompt() functions are REMOVED
+# -------------------------------------------------------------------
 
-def build_prompt(issue_text):
-    """Build the prompt for Gemini API"""
+# -------------------------------------------------------------------
+#  NEW Groq-powered analyze_issue() function
+# -------------------------------------------------------------------
+def analyze_issue(issue_text):
+    """Analyze user issue using Groq API"""
+    try:
+        # 1. Configure Client
+        client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+    except Exception as e:
+        st.error(f"Failed to configure Groq API: {e}")
+        return None
+
+    # 2. Build the prompt
     kb_string = "\n".join([
         f"{{ id: \"{a['id']}\", title: \"{a['title']}\", content: \"{a['content'][:200]}...\" }}" 
         for a in KNOWLEDGE_BASE
     ])
     
-    return f"""You are an expert IT helpdesk agent. Your task is to analyze a user-submitted IT issue.
+    system_instructions = f"""You are an expert IT helpdesk agent. Your task is to analyze a user-submitted IT issue and respond *only* with a valid JSON object.
 
-Knowledge Base:
+Here is the Knowledge Base you can use to find relevant articles:
 {kb_string}
 
-User Issue:
-"{issue_text}"
-
-Please analyze this issue and provide:
+You must provide:
 1. Category classification (Software, Hardware, Network, Login/Access, Other)
 2. Urgency level (High, Medium, Low)
-3. A single, concise initial troubleshooting step
-4. Up to 3 relevant knowledge base article IDs from the provided list
+3. A single, concise initial troubleshooting step (e.g., "Restart the printer.")
+4. Up to 3 relevant knowledge base article IDs from the provided list.
 
-Respond ONLY with valid JSON in this exact format:
+Your response MUST be a JSON object in this exact format:
 {{
-    "category": "Software|Hardware|Network|Login/Access|Other",
-    "urgency": "High|Medium|Low", 
-    "suggestedFix": "Brief actionable step starting with a verb",
+    "category": "...",
+    "urgency": "...", 
+    "suggestedFix": "...",
     "relevantArticles": [
-        {{"id": "KB001", "title": "Article Title"}},
-        {{"id": "KB002", "title": "Article Title"}}
+        {{"id": "...", "title": "..."}}
     ]
 }}"""
 
-def analyze_issue(issue_text):
-    """Analyze user issue using Gemini API"""
-    if not configure_gemini():
-        return None
-        
+    user_message = f"User Issue: \"{issue_text}\""
+
+    # 3. Call the API
     try:
-        # ------------------- THIS IS THE FIX -------------------
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        # -------------------------------------------------------
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_instructions,
+                },
+                {
+                    "role": "user",
+                    "content": user_message,
+                }
+            ],
+            # Note: "Llama 3.3" isn't out. Using Llama 3.1 70B
+            model="llama-3.1-70b-versatile", 
+            response_format={"type": "json_object"}, # Enable JSON mode
+            temperature=0.2, # Good for classification
+            max_tokens=1024,
+        )
         
-        prompt = build_prompt(issue_text)
-        
-        response = model.generate_content(prompt)
-        response_text = response.text.strip()
-        
-        # Clean the response (remove markdown code blocks if present)
-        if response_text.startswith('```json'):
-            response_text = response_text[7:]
-        if response_text.endswith('```'):
-            response_text = response_text[:-3]
-        response_text = response_text.strip()
-        
+        response_text = chat_completion.choices[0].message.content
         analysis = json.loads(response_text)
         return analysis
         
@@ -312,7 +314,7 @@ def main():
     
     # Footer
     st.sidebar.markdown("---")
-    st.sidebar.info("Powered by Google Gemini AI")
+    st.sidebar.info("Powered by Groq Llama 3.1") # <-- Updated Footer
 
 def render_help_interface():
     """Render the main help interface"""
@@ -349,7 +351,7 @@ def render_help_interface():
             return
         
         with st.spinner("🤔 AI is analyzing your issue..."):
-            analysis = analyze_issue(user_query)
+            analysis = analyze_issue(user_query) # This now calls the new Groq function
             
         if analysis:
             st.session_state.current_analysis = analysis
@@ -443,7 +445,7 @@ def render_ticket_list():
     if category_filter != "All":
         filtered_df = filtered_df[filtered_df['category'] == category_filter]
     if urgency_filter != "All":
-        filtered_df = filtered_df[filtered_df['urgency'] == urgency_filter]
+        filtered_df = filtered_df[filtered__df['urgency'] == urgency_filter]
     
     # Display tickets
     st.subheader(f"Tickets ({len(filtered_df)} found)")

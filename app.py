@@ -1,13 +1,12 @@
 import streamlit as st
-from groq import Groq  # <-- CHANGED IMPORT
+from groq import Groq
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import json
 from datetime import datetime
 from enum import Enum
-import io
-import base64
+import os
 
 # Page configuration
 st.set_page_config(
@@ -116,75 +115,104 @@ DEPARTMENT_MAPPING = {
     "Other": "General IT Support"
 }
 
-# -------------------------------------------------------------------
-#  OLD configure_gemini() and build_prompt() functions are REMOVED
-# -------------------------------------------------------------------
-
-# -------------------------------------------------------------------
-#  NEW Groq-powered analyze_issue() function
-# -------------------------------------------------------------------
-def analyze_issue(issue_text):
-    """Analyze user issue using Groq API"""
+def get_groq_client():
+    """Initialize and return Groq client"""
     try:
-        # 1. Configure Client
-        client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+        # Try Streamlit secrets first
+        api_key = st.secrets.get("GROQ_API_KEY", None)
+        
+        # Fall back to environment variable
+        if not api_key:
+            api_key = os.environ.get("GROQ_API_KEY")
+        
+        if not api_key:
+            st.error("⚠️ GROQ_API_KEY not found. Please set it in .streamlit/secrets.toml or as environment variable.")
+            return None
+            
+        return Groq(api_key=api_key)
+        
     except Exception as e:
-        st.error(f"Failed to configure Groq API: {e}")
+        st.error(f"Failed to initialize Groq client: {e}")
         return None
 
-    # 2. Build the prompt
+def build_prompt(issue_text):
+    """Build the prompt for Groq API"""
     kb_string = "\n".join([
         f"{{ id: \"{a['id']}\", title: \"{a['title']}\", content: \"{a['content'][:200]}...\" }}" 
         for a in KNOWLEDGE_BASE
     ])
     
-    system_instructions = f"""You are an expert IT helpdesk agent. Your task is to analyze a user-submitted IT issue and respond *only* with a valid JSON object.
+    return f"""You are an expert IT helpdesk agent. Your task is to analyze a user-submitted IT issue.
 
-Here is the Knowledge Base you can use to find relevant articles:
+Knowledge Base:
 {kb_string}
 
-You must provide:
+User Issue:
+"{issue_text}"
+
+Please analyze this issue and provide:
 1. Category classification (Software, Hardware, Network, Login/Access, Other)
 2. Urgency level (High, Medium, Low)
-3. A single, concise initial troubleshooting step (e.g., "Restart the printer.")
-4. Up to 3 relevant knowledge base article IDs from the provided list.
+3. A single, concise initial troubleshooting step
+4. Up to 3 relevant knowledge base article IDs from the provided list
 
-Your response MUST be a JSON object in this exact format:
+Respond ONLY with valid JSON in this exact format:
 {{
-    "category": "...",
-    "urgency": "...", 
-    "suggestedFix": "...",
+    "category": "Software|Hardware|Network|Login/Access|Other",
+    "urgency": "High|Medium|Low", 
+    "suggestedFix": "Brief actionable step starting with a verb",
     "relevantArticles": [
-        {{"id": "...", "title": "..."}}
+        {{"id": "KB001", "title": "Article Title"}},
+        {{"id": "KB002", "title": "Article Title"}}
     ]
 }}"""
 
-    user_message = f"User Issue: \"{issue_text}\""
-
-    # 3. Call the API
+def analyze_issue(issue_text):
+    """Analyze user issue using Groq API with Llama 3.3 70B"""
+    client = get_groq_client()
+    
+    if not client:
+        return None
+        
     try:
+        prompt = build_prompt(issue_text)
+        
+        # Create chat completion with Groq
         chat_completion = client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": system_instructions,
+                    "content": "You are an expert IT helpdesk agent. Always respond with valid JSON only."
                 },
                 {
                     "role": "user",
-                    "content": user_message,
+                    "content": prompt
                 }
             ],
-            # Note: "Llama 3.3" isn't out. Using Llama 3.1 70B
-            model="llama-3.1-70b-versatile", 
-            response_format={"type": "json_object"}, # Enable JSON mode
-            temperature=0.2, # Good for classification
+            model="llama-3.3-70b-versatile",
+            temperature=0.3,
             max_tokens=1024,
+            top_p=0.9
         )
         
-        response_text = chat_completion.choices[0].message.content
+        response_text = chat_completion.choices[0].message.content.strip()
+        
+        # Clean the response (remove markdown code blocks if present)
+        if response_text.startswith('```
+            response_text = response_text[7:]
+        if response_text.startswith('```'):
+            response_text = response_text[3:]
+        if response_text.endswith('```
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+        
         analysis = json.loads(response_text)
         return analysis
         
+    except json.JSONDecodeError as e:
+        st.error(f"Error parsing AI response: {e}")
+        st.error(f"Raw response: {response_text}")
+        return None
     except Exception as e:
         st.error(f"Error analyzing issue: {e}")
         return None
@@ -283,7 +311,7 @@ def display_dashboard():
             sns.barplot(x=team_counts.index, y=team_counts.values, ax=ax)
             ax.set_ylabel('Number of Tickets')
             ax.set_xlabel('Support Team')
-            plt.xticks(rotation=45)
+            plt.xticks(rotation=45, ha='right')
             st.pyplot(fig)
         else:
             st.info("No escalated tickets to show team workload.")
@@ -302,188 +330,4 @@ def main():
     
     # Sidebar for navigation
     st.sidebar.title("Navigation")
-    app_mode = st.sidebar.radio("Choose a page:", 
-                               ["Get AI Help", "Analytics Dashboard", "View All Tickets"])
-    
-    if app_mode == "Get AI Help":
-        render_help_interface()
-    elif app_mode == "Analytics Dashboard":
-        display_dashboard()
-    elif app_mode == "View All Tickets":
-        render_ticket_list()
-    
-    # Footer
-    st.sidebar.markdown("---")
-    st.sidebar.info("Powered by Groq Llama 3.1") # <-- Updated Footer
-
-def render_help_interface():
-    """Render the main help interface"""
-    st.header("🤖 Get AI Help")
-    
-    # Common questions
-    st.subheader("Common Issues")
-    common_questions = {
-        "Printer not working": "My office printer is not printing documents. It shows offline status.",
-        "WiFi connection issues": "I cannot connect to the office WiFi network on my laptop.",
-        "Password reset needed": "I forgot my password and need to reset it to access my email.",
-        "Software installation": "I need help installing the new project management software.",
-        "Email not syncing": "My email is not syncing properly on my mobile device."
-    }
-    
-    cols = st.columns(3)
-    for i, (title, question) in enumerate(common_questions.items()):
-        with cols[i % 3]:
-            if st.button(f"📌 {title}", use_container_width=True):
-                st.session_state.user_query = question
-    
-    # User input
-    st.subheader("Describe Your Issue")
-    user_query = st.text_area(
-        "Please describe your IT issue in detail:",
-        value=st.session_state.get('user_query', ''),
-        height=150,
-        placeholder="Example: My computer won't turn on and makes a beeping sound when I press the power button..."
-    )
-    
-    if st.button("🚀 Get AI Help", type="primary", use_container_width=True):
-        if not user_query.strip():
-            st.error("Please describe your issue before requesting help.")
-            return
-        
-        with st.spinner("🤔 AI is analyzing your issue..."):
-            analysis = analyze_issue(user_query) # This now calls the new Groq function
-            
-        if analysis:
-            st.session_state.current_analysis = analysis
-            st.session_state.current_user_query = user_query
-            
-            # Display analysis results
-            st.success("✅ AI Analysis Complete!")
-            
-            # Create a nice card for the analysis
-            urgency_class = ""
-            if analysis['urgency'] == 'High':
-                urgency_class = "urgent-high"
-            elif analysis['urgency'] == 'Medium':
-                urgency_class = "urgent-medium"
-            
-            st.markdown(f'<div class="ticket-card {urgency_class}">', unsafe_allow_html=True)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Category", analysis['category'])
-                st.metric("Suggested Fix", analysis['suggestedFix'])
-            with col2:
-                st.metric("Urgency Level", analysis['urgency'])
-            
-            # Display relevant articles
-            if analysis.get('relevantArticles'):
-                st.subheader("📚 Relevant Knowledge Base Articles")
-                for article in analysis['relevantArticles']:
-                    # Find article details
-                    kb_article = next((a for a in KNOWLEDGE_BASE if a['id'] == article['id']), None)
-                    if kb_article:
-                        with st.expander(f"📖 {article['title']}"):
-                            st.write(kb_article['content'])
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Resolution buttons
-            st.subheader("Next Steps")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("✅ Yes, it's resolved!", use_container_width=True, type="primary"):
-                    ticket_id = save_ticket(
-                        user_query, 
-                        analysis, 
-                        "Resolved"
-                    )
-                    if ticket_id:
-                        st.success(f"✅ Ticket {ticket_id} marked as resolved!")
-                        st.balloons()
-                        st.session_state.current_analysis = None
-                        st.session_state.user_query = ""
-            
-            with col2:
-                if st.button("❌ No, escalate to Helpdesk", use_container_width=True):
-                    routed_to = DEPARTMENT_MAPPING.get(analysis['category'], "General IT Support")
-                    ticket_id = save_ticket(
-                        user_query,
-                        analysis,
-                        "Routed",
-                        routed_to
-                    )
-                    if ticket_id:
-                        st.success(f"📋 Ticket {ticket_id} escalated to {routed_to}!")
-                        st.session_state.current_analysis = None
-                        st.session_state.user_query = ""
-
-def render_ticket_list():
-    """Render all tickets view"""
-    st.header("📋 All Tickets")
-    
-    if st.session_state.tickets_df.empty:
-        st.info("No tickets created yet.")
-        return
-    
-    df = st.session_state.tickets_df
-    
-    # Filters
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        status_filter = st.selectbox("Filter by Status", ["All"] + list(df['status'].unique()))
-    with col2:
-        category_filter = st.selectbox("Filter by Category", ["All"] + list(df['category'].unique()))
-    with col3:
-        urgency_filter = st.selectbox("Filter by Urgency", ["All"] + list(df['urgency'].unique()))
-    
-    # Apply filters
-    filtered_df = df.copy()
-    if status_filter != "All":
-        filtered_df = filtered_df[filtered_df['status'] == status_filter]
-    if category_filter != "All":
-        filtered_df = filtered_df[filtered_df['category'] == category_filter]
-    if urgency_filter != "All":
-        filtered_df = filtered_df[filtered__df['urgency'] == urgency_filter]
-    
-    # Display tickets
-    st.subheader(f"Tickets ({len(filtered_df)} found)")
-    
-    for _, ticket in filtered_df.iterrows():
-        urgency_class = ""
-        if ticket['urgency'] == 'High':
-            urgency_class = "urgent-high"
-        elif ticket['urgency'] == 'Medium':
-            urgency_class = "urgent-medium"
-        
-        st.markdown(f'<div class="ticket-card {urgency_class}">', unsafe_allow_html=True)
-        
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.write(f"**Ticket ID:** {ticket['id']}")
-            st.write(f"**Issue:** {ticket['userQuery']}")
-            st.write(f"**Suggested Fix:** {ticket['suggestedFix']}")
-        with col2:
-            st.write(f"**Category:** {ticket['category']}")
-            st.write(f"**Urgency:** {ticket['urgency']}")
-        with col3:
-            st.write(f"**Status:** {ticket['status']}")
-            if ticket['status'] == 'Routed':
-                st.write(f"**Routed To:** {ticket['routedTo']}")
-            st.write(f"**Created:** {ticket['timestamp']}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Download option
-    csv = filtered_df.to_csv(index=False)
-    st.download_button(
-        label="📥 Download Filtered Tickets as CSV",
-        data=csv,
-        file_name="filtered_tickets.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
-
-if __name__ == "__main__":
-    main()
+    app_mode = st.sidebar.radio("Choose a page:",

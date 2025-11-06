@@ -330,4 +330,188 @@ def main():
     
     # Sidebar for navigation
     st.sidebar.title("Navigation")
-    app_mode = st.sidebar.radio("Choose a page:",
+    app_mode = st.sidebar.radio("Choose a page:", 
+                               ["Get AI Help", "Analytics Dashboard", "View All Tickets"])
+    
+    if app_mode == "Get AI Help":
+        render_help_interface()
+    elif app_mode == "Analytics Dashboard":
+        display_dashboard()
+    elif app_mode == "View All Tickets":
+        render_ticket_list()
+    
+    # Footer
+    st.sidebar.markdown("---")
+    st.sidebar.info("🚀 Powered by Groq API\n⚡ Llama 3.3 70B Versatile")
+
+def render_help_interface():
+    """Render the main help interface"""
+    st.header("🤖 Get AI Help")
+    
+    # Common questions
+    st.subheader("Common Issues")
+    common_questions = {
+        "Printer not working": "My office printer is not printing documents. It shows offline status.",
+        "WiFi connection issues": "I cannot connect to the office WiFi network on my laptop.",
+        "Password reset needed": "I forgot my password and need to reset it to access my email.",
+        "Software installation": "I need help installing the new project management software.",
+        "Email not syncing": "My email is not syncing properly on my mobile device."
+    }
+    
+    cols = st.columns(3)
+    for i, (title, question) in enumerate(common_questions.items()):
+        with cols[i % 3]:
+            if st.button(f"📌 {title}", use_container_width=True):
+                st.session_state.user_query = question
+    
+    # User input
+    st.subheader("Describe Your Issue")
+    user_query = st.text_area(
+        "Please describe your IT issue in detail:",
+        value=st.session_state.get('user_query', ''),
+        height=150,
+        placeholder="Example: My computer won't turn on and makes a beeping sound when I press the power button..."
+    )
+    
+    if st.button("🚀 Get AI Help", type="primary", use_container_width=True):
+        if not user_query.strip():
+            st.error("Please describe your issue before requesting help.")
+            return
+        
+        with st.spinner("🤔 AI is analyzing your issue with Llama 3.3 70B..."):
+            analysis = analyze_issue(user_query)
+            
+        if analysis:
+            st.session_state.current_analysis = analysis
+            st.session_state.current_user_query = user_query
+            
+            # Display analysis results
+            st.success("✅ AI Analysis Complete!")
+            
+            # Create a nice card for the analysis
+            urgency_class = ""
+            if analysis['urgency'] == 'High':
+                urgency_class = "urgent-high"
+            elif analysis['urgency'] == 'Medium':
+                urgency_class = "urgent-medium"
+            
+            st.markdown(f'<div class="ticket-card {urgency_class}">', unsafe_allow_html=True)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Category", analysis['category'])
+                st.metric("Suggested Fix", analysis['suggestedFix'])
+            with col2:
+                st.metric("Urgency Level", analysis['urgency'])
+            
+            # Display relevant articles
+            if analysis.get('relevantArticles'):
+                st.subheader("📚 Relevant Knowledge Base Articles")
+                for article in analysis['relevantArticles']:
+                    # Find article details
+                    kb_article = next((a for a in KNOWLEDGE_BASE if a['id'] == article['id']), None)
+                    if kb_article:
+                        with st.expander(f"📖 {article['title']}"):
+                            st.write(kb_article['content'])
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Resolution buttons
+            st.subheader("Next Steps")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("✅ Yes, it's resolved!", use_container_width=True, type="primary"):
+                    ticket_id = save_ticket(
+                        user_query, 
+                        analysis, 
+                        "Resolved"
+                    )
+                    if ticket_id:
+                        st.success(f"✅ Ticket {ticket_id} marked as resolved!")
+                        st.balloons()
+                        st.session_state.current_analysis = None
+                        st.session_state.user_query = ""
+            
+            with col2:
+                if st.button("❌ No, escalate to Helpdesk", use_container_width=True):
+                    routed_to = DEPARTMENT_MAPPING.get(analysis['category'], "General IT Support")
+                    ticket_id = save_ticket(
+                        user_query,
+                        analysis,
+                        "Routed",
+                        routed_to
+                    )
+                    if ticket_id:
+                        st.success(f"📋 Ticket {ticket_id} escalated to {routed_to}!")
+                        st.session_state.current_analysis = None
+                        st.session_state.user_query = ""
+
+def render_ticket_list():
+    """Render all tickets view"""
+    st.header("📋 All Tickets")
+    
+    if st.session_state.tickets_df.empty:
+        st.info("No tickets created yet.")
+        return
+    
+    df = st.session_state.tickets_df
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        status_filter = st.selectbox("Filter by Status", ["All"] + list(df['status'].unique()))
+    with col2:
+        category_filter = st.selectbox("Filter by Category", ["All"] + list(df['category'].unique()))
+    with col3:
+        urgency_filter = st.selectbox("Filter by Urgency", ["All"] + list(df['urgency'].unique()))
+    
+    # Apply filters
+    filtered_df = df.copy()
+    if status_filter != "All":
+        filtered_df = filtered_df[filtered_df['status'] == status_filter]
+    if category_filter != "All":
+        filtered_df = filtered_df[filtered_df['category'] == category_filter]
+    if urgency_filter != "All":
+        filtered_df = filtered_df[filtered_df['urgency'] == urgency_filter]
+    
+    # Display tickets
+    st.subheader(f"Tickets ({len(filtered_df)} found)")
+    
+    for _, ticket in filtered_df.iterrows():
+        urgency_class = ""
+        if ticket['urgency'] == 'High':
+            urgency_class = "urgent-high"
+        elif ticket['urgency'] == 'Medium':
+            urgency_class = "urgent-medium"
+        
+        st.markdown(f'<div class="ticket-card {urgency_class}">', unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns()[1][2]
+        with col1:
+            st.write(f"**Ticket ID:** {ticket['id']}")
+            st.write(f"**Issue:** {ticket['userQuery']}")
+            st.write(f"**Suggested Fix:** {ticket['suggestedFix']}")
+        with col2:
+            st.write(f"**Category:** {ticket['category']}")
+            st.write(f"**Urgency:** {ticket['urgency']}")
+        with col3:
+            st.write(f"**Status:** {ticket['status']}")
+            if ticket['status'] == 'Routed':
+                st.write(f"**Routed To:** {ticket['routedTo']}")
+            st.write(f"**Created:** {ticket['timestamp']}")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Download option
+    csv = filtered_df.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Filtered Tickets as CSV",
+        data=csv,
+        file_name="filtered_tickets.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+if __name__ == "__main__":
+    main()

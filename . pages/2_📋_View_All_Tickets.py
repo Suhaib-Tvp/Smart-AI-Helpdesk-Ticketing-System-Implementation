@@ -1,6 +1,12 @@
 """View All Tickets Page."""
 import streamlit as st
 import pandas as pd
+import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from utils import TicketManager
 
 st.set_page_config(page_title="View All Tickets", page_icon="📋", layout="wide")
